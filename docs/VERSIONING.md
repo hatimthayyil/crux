@@ -67,7 +67,7 @@ jj git fetch
 jj duplicate <change-id> -d crux_core-v0.17.0
 # jj prints the new change ID in the output; use it to create the tag
 jj tag set crux_core-v0.17.0-docs.1 -r <new-change-id>
-jj git push --remote origin --named crux_core-v0.17.0-docs.1
+jj git push --remote origin --named crux_core-v0.17.0-docs.1=<change-id>
 ```
 
 If `jj duplicate` produces conflicts and you want to interactively pick only some
