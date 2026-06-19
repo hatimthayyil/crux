@@ -53,7 +53,7 @@ git checkout -b docs-patch/v0.17.0 crux_core-v0.17.0
 git cherry-pick <sha>   # the commit (or squashed merge commit) from master
 # resolve any trivial conflicts, then:
 git tag crux_core-v0.17.0-docs.1
-git push origin crux_core-v0.17.0-docs.1
+git push origin tag crux_core-v0.17.0-docs.1
 # the working branch can be deleted after the tag is pushed
 git checkout master
 git branch -d docs-patch/v0.17.0
@@ -67,7 +67,7 @@ jj git fetch
 jj duplicate <change-id> -d crux_core-v0.17.0
 # jj prints the new change ID in the output; use it to create the tag
 jj tag set crux_core-v0.17.0-docs.1 -r <new-change-id>
-jj git push --remote origin --named crux_core-v0.17.0-docs.1=<change-id>
+git push origin tag crux_core-v0.17.0-docs.1
 ```
 
 If `jj duplicate` produces conflicts and you want to interactively pick only some

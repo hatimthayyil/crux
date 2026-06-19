@@ -94,7 +94,7 @@ accordingly, and potentially request some side-effects.
 <!--prettier-ignore-->
 > [!NOTE]
 > To learn more about the [`Command` API](https://docs.rs/crux_core/latest/crux_core/command/index.html),
-> see the page in the book that describes [Managed Effects](https://redbadger.github.io/crux/guide/effects.html),
+> see the page in the book that describes [Managed Effects](https://redbadger.github.io/crux/part-2/effects.html),
 > or look at the [examples](./examples):
 >
 > 1. [Counter](./examples/counter) — get the basics
