@@ -17,6 +17,21 @@ pub struct HttpHeader {
     pub value: String,
 }
 
+/// A raw HTTP request, as sent to the shell over the protocol boundary.
+///
+/// # No header validation
+///
+/// All fields are plain strings. Header names and values are carried as-is with no
+/// validation against the HTTP specification. This is intentional: `HttpRequest` is a
+/// cross-language data carrier deserialised by Swift, Kotlin, and TypeScript shells;
+/// Rust's `http`-crate validation rules cannot be enforced on the other side of that
+/// boundary.
+///
+/// **Shell authors must not assume that header names or values are well-formed.**
+/// Pass them to your underlying HTTP client as-is — it will apply its own rules.
+///
+/// For the ergonomic Rust-side builder that *does* validate header values (and panics
+/// on invalid input), see [`crate::command::RequestBuilder`].
 #[derive(facet::Facet, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Builder)]
 #[builder(
     custom_constructor,
@@ -80,6 +95,15 @@ impl HttpRequest {
 }
 
 impl HttpRequestBuilder {
+    /// Appends a header to the request.
+    ///
+    /// Both `name` and `value` are accepted as plain strings with **no validation**.
+    /// `HttpRequestBuilder` constructs protocol-layer values (primarily for tests),
+    /// not validated HTTP requests, so arbitrary strings — including deliberately
+    /// malformed ones — are allowed.
+    ///
+    /// For validated header setting in app code, use
+    /// [`crate::command::RequestBuilder::header`], which panics on invalid values.
     pub fn header(&mut self, name: impl Into<String>, value: impl Into<String>) -> &mut Self {
         self.headers.get_or_insert_with(Vec::new).push(HttpHeader {
             name: name.into(),

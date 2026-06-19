@@ -217,6 +217,20 @@ Note: this is the protocol-level view. In Rust app code, `Response::new()` conve
 4xx/5xx responses into `Err(HttpError::Http { code, .. })`, so that layer does surface
 them as errors — just not via the FFI.
 
+---
+
+**`protocol::HttpRequest` header fields are unvalidated strings — shell authors must not assume validation has occurred.**
+
+`HttpRequest` is a cross-language data carrier. Its header `name` and `value` fields are
+raw strings with no HTTP-spec validation. The high-level [`RequestBuilder::header`] in
+app code *does* validate values via the `http` crate and panics on invalid input, but
+that validation happens before the request is serialised into `HttpRequest`; it is not
+a property of the protocol type itself.
+
+`HttpRequestBuilder::header` (used when constructing test fixtures) accepts any string
+by design — including deliberately malformed values. Shell authors: pass headers straight
+to your underlying HTTP client and let it apply its own rules.
+
 ## [0.18.0](https://github.com/redbadger/crux/compare/crux_http-v0.17.0...crux_http-v0.18.0) - 2026-05-31
 
 ### 🚀 Features

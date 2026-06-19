@@ -244,9 +244,9 @@ The low-level header mutation methods on `Request`, `RawResponse`, and
 any) and `append_header` returns `bool`.
 
 The high-level builder `.header(name, value)` on `RequestBuilder` and
-`ResponseBuilder` is **unchanged** — it still accepts any `impl AsRef<str>`.
-Only direct calls to `insert_header` or `append_header` on the types
-themselves need updating.
+`ResponseBuilder` is **unchanged** — it still accepts any `impl AsRef<str>` for
+convenience and panics on invalid values. Only direct calls to `insert_header`
+or `append_header` on the types themselves need updating.
 
 ```rust
 use crux_http::http::HeaderValue;
