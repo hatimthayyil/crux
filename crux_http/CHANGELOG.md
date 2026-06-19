@@ -191,6 +191,32 @@ req.insert_header("x-trace-id", HeaderValue::from_static("abc"));
   `await` on `http_types::Body::into_bytes()` is gone.
 - `ResponseAsync` renamed to `RawResponse` throughout.
 
+### 📝 Notes
+
+**HTTP error status codes (4xx, 5xx) arrive as `HttpResult::Ok`, not `HttpResult::Err`.**
+
+This is intentional and unchanged from previous versions. `HttpResult::Err` signals only
+a *transport-level* failure — the shell could not complete the exchange at all (bad URL,
+IO error, or timeout). Any completed HTTP exchange, regardless of status code, is
+`HttpResult::Ok(HttpResponse { status, … })`.
+
+To handle error status codes, inspect `response.status`:
+
+```rust
+match result {
+    HttpResult::Ok(response) if response.status == 200 => { /* success */ }
+    HttpResult::Ok(response) if response.status >= 400 => { /* HTTP error */ }
+    HttpResult::Ok(_) => { /* other */ }
+    HttpResult::Err(e) => { /* transport failure: bad URL, IO error, or timeout */ }
+}
+```
+
+The three `HttpError` variants that cross the FFI boundary are `Url`, `Io`, and `Timeout`.
+
+Note: this is the protocol-level view. In Rust app code, `Response::new()` converts
+4xx/5xx responses into `Err(HttpError::Http { code, .. })`, so that layer does surface
+them as errors — just not via the FFI.
+
 ## [0.18.0](https://github.com/redbadger/crux/compare/crux_http-v0.17.0...crux_http-v0.18.0) - 2026-05-31
 
 ### 🚀 Features

@@ -185,10 +185,37 @@ impl HttpResponseBuilder {
     }
 }
 
+/// The result of an HTTP request, as returned by the shell over the protocol boundary.
+///
+/// # Status codes are not errors
+///
+/// Any completed HTTP exchange — including responses with 4xx or 5xx status codes — is
+/// returned as [`HttpResult::Ok`]. Only *transport-level* failures (the shell could not
+/// reach the server at all) produce [`HttpResult::Err`].
+///
+/// To act on an error status, inspect [`HttpResponse::status`]:
+///
+/// ```
+/// # use crux_http::protocol::{HttpResult, HttpResponse};
+/// # use crux_http::HttpError;
+/// # fn handle(result: HttpResult) {
+/// match result {
+///     HttpResult::Ok(response) if response.status == 200 => { /* success */ }
+///     HttpResult::Ok(response) if response.status == 404 => { /* not found */ }
+///     HttpResult::Ok(response) if response.status >= 500 => { /* server error */ }
+///     HttpResult::Ok(_) => { /* other status */ }
+///     HttpResult::Err(e) => { /* transport failure: bad URL, IO error, or timeout */ }
+/// }
+/// # }
+/// ```
 #[derive(facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum HttpResult {
+    /// The shell completed the HTTP exchange. The response may carry any status code,
+    /// including 4xx and 5xx — inspect [`HttpResponse::status`] to distinguish them.
     Ok(HttpResponse),
+    /// The shell could not complete the HTTP exchange due to a transport-level failure.
+    /// See [`HttpError`] for the possible causes.
     Err(HttpError),
 }
 
