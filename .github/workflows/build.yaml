@@ -34,6 +34,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
@@ -69,3 +70,7 @@ jobs:
         run: |
           cargo nextest run -p crux_http --features crux_http/http-types
           cargo test --doc -p crux_http --features crux_http/http-types
+
+      - name: Check crux_http for wasm32-unknown-unknown
+        shell: bash
+        run: cargo check -p crux_http --target wasm32-unknown-unknown
