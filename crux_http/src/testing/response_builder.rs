@@ -17,9 +17,15 @@ impl ResponseBuilder<Vec<u8>> {
     }
 
     /// Constructs a new `ResponseBuilder` with the specified status code.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `status` is outside the valid HTTP range (100–999).
     #[must_use]
     pub fn with_status(status: u16) -> Self {
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status = StatusCode::from_u16(status).expect(
+            "ResponseBuilder::with_status called with an out-of-range code (must be 100–999)",
+        );
         let response = Response::new_with_status(status);
         Self { response }
     }

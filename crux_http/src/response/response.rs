@@ -361,7 +361,9 @@ impl<Body> TryFrom<Response<Body>> for http::Response<Body> {
 mod tests {
     use http::{HeaderMap, StatusCode};
 
-    use crate::{RawResponse, response::Response, testing::ResponseBuilder};
+    use crate::{
+        HttpError, HttpResponse, RawResponse, response::Response, testing::ResponseBuilder,
+    };
 
     #[test]
     fn status_is_http_status_code() {
@@ -415,8 +417,8 @@ mod tests {
             .json(serde_json::json!({"data": 42}))
             .build();
 
-        // Step 1: HttpResponse → RawResponse (via From impl in response_async.rs)
-        let response_async = RawResponse::from(http_response);
+        // Step 1: HttpResponse → RawResponse (via TryFrom impl in raw_response.rs)
+        let response_async = RawResponse::try_from(http_response).expect("valid status");
 
         // Step 2: RawResponse → Response<Vec<u8>> (the path the command executor takes)
         let response = Response::<Vec<u8>>::new(response_async).expect("should decode");
@@ -439,6 +441,67 @@ mod tests {
         let back: Response<Vec<u8>> = serde_json::from_str(&json).expect("should deserialize");
         assert_eq!(back.status().as_u16(), 200);
         assert_eq!(back.body().unwrap(), &[42u8]);
+    }
+
+    #[test]
+    fn non_standard_status_499_becomes_http_error() {
+        // 499 is a non-standard client error (client closed connection).
+        // It arrives as HttpResponse from the shell, is converted to RawResponse,
+        // and Response::new() converts it to HttpError::Http with the original code.
+        let http_response = HttpResponse::status(499)
+            .body(b"client closed connection".to_vec())
+            .build();
+        let raw = RawResponse::try_from(http_response).expect("499 is a valid status code");
+        let result = Response::<Vec<u8>>::new(raw);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, HttpError::Http { code, .. } if code == 499));
+    }
+
+    #[test]
+    fn non_standard_status_599_becomes_http_error() {
+        let http_response = HttpResponse::status(599)
+            .body(b"custom server error".to_vec())
+            .build();
+        let raw = RawResponse::try_from(http_response).expect("599 is a valid status code");
+        let result = Response::<Vec<u8>>::new(raw);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, HttpError::Http { code, .. } if code == 599));
+    }
+
+    #[test]
+    fn non_standard_4xx_status_preserves_code_in_error() {
+        for status in [490, 491, 492, 493, 494, 495, 496, 497, 498, 499] {
+            let http_response = HttpResponse::status(status).body(b"".to_vec()).build();
+            let raw = RawResponse::try_from(http_response)
+                .unwrap_or_else(|_| panic!("{status} is a valid status code"));
+            let result = Response::<Vec<u8>>::new(raw);
+
+            let err = result.expect_err("should be an error");
+            assert!(
+                matches!(err, HttpError::Http { code, .. } if code == status),
+                "Expected status {status} to be preserved in HttpError, got: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn response_builder_with_non_standard_status_499() {
+        let res: Response<Vec<u8>> = ResponseBuilder::with_status(499).build();
+        assert_eq!(res.status().as_u16(), 499);
+    }
+
+    #[test]
+    fn response_serde_roundtrip_with_non_standard_status() {
+        let res: Response<Vec<u8>> = ResponseBuilder::with_status(499)
+            .body(b"test".to_vec())
+            .build();
+        let json = serde_json::to_string(&res).expect("should serialize");
+        let back: Response<Vec<u8>> = serde_json::from_str(&json).expect("should deserialize");
+        assert_eq!(back.status().as_u16(), 499);
     }
 }
 

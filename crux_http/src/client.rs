@@ -125,7 +125,7 @@ impl Client {
                     .into_protocol_request()
                     .expect("Failed to create request");
                 match client.effect_sender.send(request).await {
-                    HttpResult::Ok(response) => Ok(response.into()),
+                    HttpResult::Ok(response) => response.try_into(),
                     HttpResult::Err(e) => Err(e),
                 }
             })

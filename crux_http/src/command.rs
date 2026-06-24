@@ -389,7 +389,9 @@ where
                 .await;
 
             match result {
-                HttpResult::Ok(response) => Response::<Vec<u8>>::new(response.into())
+                HttpResult::Ok(response) => response
+                    .try_into()
+                    .and_then(Response::<Vec<u8>>::new)
                     .and_then(|r| self.expectation.decode(r)),
                 HttpResult::Err(error) => Err(error),
             }

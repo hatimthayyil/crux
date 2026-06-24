@@ -280,10 +280,24 @@ impl AsMut<HeaderMap> for RawResponse {
     }
 }
 
-impl From<HttpResponse> for RawResponse {
-    fn from(r: HttpResponse) -> Self {
+impl TryFrom<HttpResponse> for RawResponse {
+    type Error = HttpError;
+
+    fn try_from(r: HttpResponse) -> Result<Self> {
+        let HttpResponse {
+            status: status_u16,
+            headers: header_fields,
+            body,
+        } = r;
+
+        let status = StatusCode::from_u16(status_u16).map_err(|_| HttpError::Http {
+            code: status_u16,
+            message: format!("invalid HTTP status code: {status_u16}"),
+            body: None,
+        })?;
+
         let mut headers = HeaderMap::new();
-        for header in r.headers {
+        for header in header_fields {
             if let (Ok(name), Ok(value)) = (
                 HeaderName::from_bytes(header.name.as_bytes()),
                 HeaderValue::from_str(&header.value),
@@ -291,11 +305,7 @@ impl From<HttpResponse> for RawResponse {
                 headers.append(name, value);
             }
         }
-        Self::new(
-            StatusCode::from_u16(r.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            headers,
-            r.body,
-        )
+        Ok(Self::new(status, headers, body))
     }
 }
 
@@ -335,5 +345,53 @@ impl Index<&str> for RawResponse {
     #[inline]
     fn index(&self, name: &str) -> &HeaderValue {
         &self.headers[name]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::HttpResponse;
+
+    #[test]
+    fn from_http_response_preserves_non_standard_status_499() {
+        let http_response = HttpResponse::status(499)
+            .body(b"client closed connection".to_vec())
+            .build();
+        let raw = RawResponse::try_from(http_response).expect("499 is a valid status code");
+        assert_eq!(raw.status().as_u16(), 499);
+        assert!(raw.status().is_client_error());
+    }
+
+    #[test]
+    fn from_http_response_preserves_non_standard_status_103() {
+        // 103 Early Hints (StatusCode::EARLY_HINTS) - verify informational codes are
+        // preserved and not mistakenly treated as errors.
+        let http_response = HttpResponse::status(103).body(b"".to_vec()).build();
+        let raw = RawResponse::try_from(http_response).expect("103 is a valid status code");
+        assert_eq!(raw.status().as_u16(), 103);
+    }
+
+    #[test]
+    fn from_http_response_preserves_edge_case_status_599() {
+        let http_response = HttpResponse::status(599)
+            .body(b"custom server error".to_vec())
+            .build();
+        let raw = RawResponse::try_from(http_response).expect("599 is a valid status code");
+        assert_eq!(raw.status().as_u16(), 599);
+        assert!(raw.status().is_server_error());
+    }
+
+    #[test]
+    fn from_http_response_rejects_out_of_range_status() {
+        for bad_code in [0u16, 99, 1000, u16::MAX] {
+            let http_response = HttpResponse::status(bad_code).body(b"".to_vec()).build();
+            let err = RawResponse::try_from(http_response)
+                .expect_err(&format!("{bad_code} should be rejected"));
+            assert!(
+                matches!(err, HttpError::Http { code, .. } if code == bad_code),
+                "expected HttpError::Http with code {bad_code}, got: {err:?}"
+            );
+        }
     }
 }
