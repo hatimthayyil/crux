@@ -83,6 +83,18 @@ impl Client {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_with_config<Sender>(sender: Sender, config: Config) -> Self
+    where
+        Sender: EffectSender + Send + Sync + 'static,
+    {
+        Self {
+            config,
+            effect_sender: Arc::new(sender),
+            middleware: Arc::new(vec![]),
+        }
+    }
+
     // This is currently dead code because there's no easy way to configure a client.
     // TODO: fix that in some future PR
     #[allow(dead_code)]
@@ -368,5 +380,55 @@ mod client_tests {
             shell.take_requests_received(),
             vec![HttpRequest::get("https://example.com/").build()]
         );
+    }
+
+    #[futures_test::test]
+    async fn config_headers_are_sent_with_every_request() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().build());
+
+        let config = crate::Config::default()
+            .add_header("x-api-key", "secret")
+            .unwrap();
+        let client = Client::new_with_config(shell.clone(), config);
+
+        client.get("https://example.com").await.unwrap();
+
+        let reqs = shell.take_requests_received();
+        assert_eq!(reqs.len(), 1);
+        assert!(
+            reqs[0]
+                .headers
+                .iter()
+                .any(|h| h.name == "x-api-key" && h.value == "secret"),
+            "x-api-key config header must appear in the outgoing request"
+        );
+    }
+
+    #[futures_test::test]
+    async fn per_request_header_takes_precedence_over_config_header() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().build());
+
+        let config = crate::Config::default()
+            .add_header("x-version", "config-value")
+            .unwrap();
+        let client = Client::new_with_config(shell.clone(), config);
+
+        // Per-request header for the same name.
+        let mut req =
+            crate::Request::new(http::Method::GET, "https://example.com".parse().unwrap());
+        req.insert_header("x-version", http::HeaderValue::from_static("request-value"));
+        client.send(req).await.unwrap();
+
+        let reqs = shell.take_requests_received();
+        let values: Vec<&str> = reqs[0]
+            .headers
+            .iter()
+            .filter(|h| h.name == "x-version")
+            .map(|h| h.value.as_str())
+            .collect();
+
+        assert_eq!(values, ["request-value"], "per-request header must win");
     }
 }

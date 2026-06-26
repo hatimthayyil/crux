@@ -624,4 +624,34 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_slice(&protocol_req.body).unwrap();
         assert_eq!(parsed["name"], "widget");
     }
+
+    #[test]
+    fn non_ascii_header_values_are_omitted_from_protocol_request() {
+        use crate::{Request, Url, protocol::ProtocolRequestBuilder};
+        use http::{HeaderValue, Method};
+
+        let mut req = Request::new(Method::GET, Url::parse("https://example.com").unwrap());
+
+        // ASCII value — must be forwarded.
+        req.insert_header("x-trace-id", HeaderValue::from_static("abc123"));
+
+        // Opaque bytes (>= 0x80): HeaderValue::from_bytes accepts them, but to_str() fails.
+        // This can arise when headers are set via HeaderValue::from_bytes, e.g. in middleware.
+        let opaque = HeaderValue::from_bytes(b"\x80binary\xff").unwrap();
+        req.insert_header("x-opaque", opaque);
+
+        let protocol_req = req.into_protocol_request().expect("must not fail");
+
+        let has_trace = protocol_req
+            .headers
+            .iter()
+            .any(|h| h.name == "x-trace-id" && h.value == "abc123");
+        let has_opaque = protocol_req.headers.iter().any(|h| h.name == "x-opaque");
+
+        assert!(has_trace, "ASCII header must be forwarded to the shell");
+        assert!(
+            !has_opaque,
+            "header with non-ASCII value must be silently omitted"
+        );
+    }
 }

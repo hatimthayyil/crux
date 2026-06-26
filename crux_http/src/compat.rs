@@ -84,3 +84,47 @@ impl From<http_types::Response> for RawResponse {
         Self::new(status, headers, vec![])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Request, Url};
+    use http::{HeaderValue, Method};
+
+    #[test]
+    fn request_to_http_types_preserves_multi_value_headers() {
+        let mut req = Request::new(Method::GET, Url::parse("https://example.com").unwrap());
+        req.append_header(
+            http::header::COOKIE,
+            HeaderValue::from_static("session=abc"),
+        );
+        req.append_header(http::header::COOKIE, HeaderValue::from_static("pref=dark"));
+
+        let ht: http_types::Request = req.into();
+
+        let cookie_values: Vec<String> = ht
+            .header("cookie")
+            .into_iter()
+            .flat_map(|vals| vals.iter())
+            .map(|v| v.to_string())
+            .collect();
+
+        assert_eq!(cookie_values.len(), 2, "both cookie values must survive");
+        assert!(cookie_values.iter().any(|v| v == "session=abc"));
+        assert!(cookie_values.iter().any(|v| v == "pref=dark"));
+    }
+
+    #[test]
+    fn http_types_request_to_request_preserves_multi_value_headers() {
+        let mut ht = http_types::Request::new(
+            http_types::Method::Get,
+            "https://example.com".parse::<http_types::Url>().unwrap(),
+        );
+        ht.append_header("set-cookie", "a=1");
+        ht.append_header("set-cookie", "b=2");
+
+        let req: Request = ht.into();
+
+        let values: Vec<&HeaderValue> = req.header_all("set-cookie").into_iter().collect();
+        assert_eq!(values.len(), 2, "both set-cookie values must survive");
+    }
+}
