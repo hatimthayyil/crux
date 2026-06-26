@@ -115,4 +115,27 @@ mod tests {
         assert!(matches!(http_err, HttpError::Io(_)));
         assert_eq!(http_err.to_string(), "IO error: file not found");
     }
+
+    #[test]
+    fn serde_json_error_converts_to_json_variant() {
+        let json_err: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("{bad}").unwrap_err();
+        let http_err = HttpError::from(json_err);
+        assert!(matches!(http_err, HttpError::Json(_)));
+    }
+
+    #[test]
+    fn url_parse_error_converts_to_url_variant() {
+        let url_err = url::Url::parse("not a url").unwrap_err();
+        let http_err = HttpError::from(url_err);
+        assert!(matches!(http_err, HttpError::Url(_)));
+    }
+
+    #[test]
+    fn serde_qs_error_converts_to_json_variant() {
+        let qs_err: serde_qs::Error =
+            serde_qs::from_str::<std::collections::HashMap<String, String>>("%bad%").unwrap_err();
+        let http_err = HttpError::from(qs_err);
+        assert!(matches!(http_err, HttpError::Json(_)));
+    }
 }

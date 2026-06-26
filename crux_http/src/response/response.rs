@@ -503,6 +503,47 @@ mod tests {
         let back: Response<Vec<u8>> = serde_json::from_str(&json).expect("should deserialize");
         assert_eq!(back.status().as_u16(), 499);
     }
+
+    #[test]
+    fn body_bytes_returns_error_when_body_already_taken() {
+        let mut res: Response<Vec<u8>> = ResponseBuilder::ok().body(b"hello".to_vec()).build();
+        let _ = res.body_bytes().unwrap();
+        let err = res.body_bytes().expect_err("second call must fail");
+        assert!(matches!(err, HttpError::Http { .. }));
+    }
+
+    #[test]
+    fn try_from_response_with_no_body_returns_err() {
+        // `new_with_status` produces body: None (used for e.g. HEAD responses).
+        let res = Response::<Vec<u8>>::new_with_status(StatusCode::OK);
+        let result = http::Response::<Vec<u8>>::try_from(res);
+        assert!(result.is_err(), "TryFrom must return Err when body is None");
+    }
+
+    #[test]
+    fn multi_value_headers_survive_serde_roundtrip() {
+        let res: Response<Vec<u8>> = ResponseBuilder::ok()
+            .header("set-cookie", "a=1")
+            .append_header("set-cookie", "b=2")
+            .body(b"".to_vec())
+            .build();
+
+        let json = serde_json::to_string(&res).expect("should serialize");
+        let back: Response<Vec<u8>> = serde_json::from_str(&json).expect("should deserialize");
+
+        let values: Vec<&str> = back
+            .header_all("set-cookie")
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            values.len(),
+            2,
+            "both Set-Cookie values must survive serde: {values:?}"
+        );
+        assert!(values.contains(&"a=1"));
+        assert!(values.contains(&"b=2"));
+    }
 }
 
 /// Custom serde for `http::StatusCode` (serialized as `u16`).

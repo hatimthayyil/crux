@@ -179,6 +179,26 @@ mod decode_tests {
     }
 
     #[test]
+    fn utf8_no_hyphen_alias() {
+        let input = "Rød grød med fløde";
+        assert_eq!(
+            decode_body(input.as_bytes().to_vec(), Some("utf8")).unwrap(),
+            input,
+            "\"utf8\" (no hyphen) is recognised as UTF-8"
+        );
+    }
+
+    #[test]
+    fn unicode_1_1_utf_8_alias() {
+        let input = "Rød grød med fløde";
+        assert_eq!(
+            decode_body(input.as_bytes().to_vec(), Some("unicode-1-1-utf-8")).unwrap(),
+            input,
+            "\"unicode-1-1-utf-8\" is recognised as UTF-8"
+        );
+    }
+
+    #[test]
     fn euc_kr() {
         let input = vec![
             0xb3, 0xbb, 0x20, 0xc7, 0xb0, 0xc0, 0xb8, 0xb7, 0xce, 0x20, 0xb5, 0xb9, 0xbe, 0xc6,

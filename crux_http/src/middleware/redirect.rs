@@ -204,6 +204,88 @@ mod tests {
     }
 
     #[futures_test::test]
+    async fn follows_303_redirect() {
+        let shell = FakeShell::default();
+        shell.provide_response(
+            HttpResponse::status(303)
+                .header("location", "https://example.com/new")
+                .build(),
+        );
+        shell.provide_response(HttpResponse::ok().build());
+        shell.provide_response(HttpResponse::ok().body("303 done").build());
+
+        let client = Client::new(shell.clone()).with(Redirect::new(3));
+        let mut response = client.get("https://example.com/old").await.unwrap();
+
+        assert_eq!(response.body_string().unwrap(), "303 done");
+        assert_eq!(
+            shell.take_requests_received()[1].url,
+            "https://example.com/new"
+        );
+    }
+
+    #[futures_test::test]
+    async fn follows_307_redirect() {
+        let shell = FakeShell::default();
+        shell.provide_response(
+            HttpResponse::status(307)
+                .header("location", "https://example.com/new")
+                .build(),
+        );
+        shell.provide_response(HttpResponse::ok().build());
+        shell.provide_response(HttpResponse::ok().body("307 done").build());
+
+        let client = Client::new(shell.clone()).with(Redirect::new(3));
+        let mut response = client.get("https://example.com/old").await.unwrap();
+
+        assert_eq!(response.body_string().unwrap(), "307 done");
+        assert_eq!(
+            shell.take_requests_received()[1].url,
+            "https://example.com/new"
+        );
+    }
+
+    #[futures_test::test]
+    async fn follows_308_redirect() {
+        let shell = FakeShell::default();
+        shell.provide_response(
+            HttpResponse::status(308)
+                .header("location", "https://example.com/new")
+                .build(),
+        );
+        shell.provide_response(HttpResponse::ok().build());
+        shell.provide_response(HttpResponse::ok().body("308 done").build());
+
+        let client = Client::new(shell.clone()).with(Redirect::new(3));
+        let mut response = client.get("https://example.com/old").await.unwrap();
+
+        assert_eq!(response.body_string().unwrap(), "308 done");
+        assert_eq!(
+            shell.take_requests_received()[1].url,
+            "https://example.com/new"
+        );
+    }
+
+    #[futures_test::test]
+    async fn redirect_with_no_location_header_keeps_original_url() {
+        // A 301 with no Location header: the middleware silently skips URL rewriting
+        // and the loop continues, eventually falling through to next.run with the
+        // original URL unchanged.
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::status(301).build()); // no Location
+        shell.provide_response(HttpResponse::ok().build()); // loop iter 2 breaks
+        shell.provide_response(HttpResponse::ok().body("same url").build()); // next.run
+
+        let client = Client::new(shell.clone()).with(Redirect::new(3));
+        let mut response = client.get("https://example.com/start").await.unwrap();
+
+        assert_eq!(response.body_string().unwrap(), "same url");
+        let reqs = shell.take_requests_received();
+        // All three requests go to the original URL — no rewrite happened.
+        assert!(reqs.iter().all(|r| r.url == "https://example.com/start"));
+    }
+
+    #[futures_test::test]
     async fn stops_after_max_attempts() {
         let shell = FakeShell::default();
         // With attempts=2: loop runs twice (both 301), then next.run fires once.

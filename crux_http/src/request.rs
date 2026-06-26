@@ -581,6 +581,20 @@ mod tests {
     }
 
     #[test]
+    fn from_http_request_with_unparseable_uri_falls_back_to_placeholder() {
+        // `http::Uri` accepts asterisk-form (`*`, used in OPTIONS) which `url::Url`
+        // cannot parse.  The impl falls back to a placeholder URL rather than panicking.
+        use crate::Body;
+        let http_req = http::Request::builder()
+            .method(Method::OPTIONS)
+            .uri("*")
+            .body(Body::from(vec![]))
+            .unwrap();
+        let req: Request = http_req.into();
+        assert_eq!(req.url().as_str(), "https://invalid.example.com/");
+    }
+
+    #[test]
     fn url_mut_allows_url_mutation() {
         let mut req = get("https://example.com/old");
         *req.url_mut() = Url::parse("https://example.com/new").unwrap();

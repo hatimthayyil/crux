@@ -431,4 +431,77 @@ mod client_tests {
 
         assert_eq!(values, ["request-value"], "per-request header must win");
     }
+
+    #[futures_test::test]
+    async fn recv_bytes_returns_body() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("bytes").build());
+        let client = Client::new(shell);
+        let bytes = client
+            .recv_bytes(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"bytes");
+    }
+
+    #[futures_test::test]
+    async fn recv_string_returns_body() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("hello").build());
+        let client = Client::new(shell);
+        let text = client
+            .recv_string(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[futures_test::test]
+    async fn recv_json_deserializes_body() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Payload {
+            value: u32,
+        }
+        let shell = FakeShell::default();
+        shell.provide_response(
+            HttpResponse::ok()
+                .header("content-type", "application/json")
+                .json(serde_json::json!({"value": 42}))
+                .build(),
+        );
+        let client = Client::new(shell);
+        let payload: Payload = client
+            .recv_json(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(payload, Payload { value: 42 });
+    }
+
+    #[futures_test::test]
+    async fn recv_form_deserializes_body() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Payload {
+            key: String,
+        }
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("key=val").build());
+        let client = Client::new(shell);
+        let payload: Payload = client
+            .recv_form(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(payload, Payload { key: "val".into() });
+    }
 }

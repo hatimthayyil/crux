@@ -53,3 +53,25 @@ impl Config {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_header_stores_valid_value() {
+        let config = Config::default().add_header("x-api-key", "secret").unwrap();
+        let val = config.headers.get("x-api-key").unwrap();
+        assert_eq!(val.to_str().unwrap(), "secret");
+    }
+
+    #[test]
+    fn add_header_rejects_invalid_value() {
+        // Control characters (other than tab) are rejected by HeaderValue::from_str.
+        let result = Config::default().add_header("x-bad", "val\x00ue");
+        assert!(
+            matches!(result, Err(HttpError::Io(_))),
+            "invalid header value must return HttpError::Io"
+        );
+    }
+}
