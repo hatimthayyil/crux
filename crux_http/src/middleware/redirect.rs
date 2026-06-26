@@ -80,7 +80,9 @@ impl Middleware for Redirect {
             let res: RawResponse = client.send(r).await?;
             if REDIRECT_CODES.contains(&res.status()) {
                 if let Some(location) = res.header(http::header::LOCATION) {
-                    let location_str = location.to_str().unwrap_or("");
+                    let location_str = location.to_str().map_err(|_| {
+                        crate::HttpError::Io("redirect Location header is not valid ASCII".into())
+                    })?;
                     *request.url_mut() = match url::Url::parse(location_str) {
                         Ok(valid_url) => {
                             base_url = valid_url;

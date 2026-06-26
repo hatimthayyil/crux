@@ -48,7 +48,7 @@ impl From<Request> for http_types::Request {
         let mut ht_req = Self::new(method, req.url().clone());
 
         for (name, value) in &req {
-            ht_req.insert_header(name.as_str(), value.to_str().unwrap_or(""));
+            ht_req.append_header(name.as_str(), value.to_str().unwrap_or(""));
         }
 
         let bytes = req.take_body().into_bytes();
@@ -62,7 +62,10 @@ impl From<Request> for http_types::Request {
 impl From<http_types::Response> for RawResponse {
     /// Convert an `http_types::Response` into a `crux_http::RawResponse`.
     ///
-    /// The body is left empty because `http_types::Body::into_bytes()` is async.
+    /// **The body is always empty.** `http_types::Body::into_bytes()` is async and cannot
+    /// be called from a `From` impl. If you need the response body, read it from the
+    /// `http_types::Response` before converting, then set it on the result with
+    /// `body_bytes` or by constructing `RawResponse` directly.
     fn from(res: http_types::Response) -> Self {
         let status = http::StatusCode::from_u16(u16::from(res.status()))
             .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR);

@@ -5,7 +5,7 @@ use std::{fmt, ops::Index};
 use super::decode::decode_body;
 use crate::{HttpError, Result, protocol::HttpResponse};
 
-/// An HTTP response that exposes async methods for use in middleware.
+/// An in-memory HTTP response as returned by the shell, used in the middleware chain.
 pub struct RawResponse {
     status: StatusCode,
     version: Option<Version>,

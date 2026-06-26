@@ -284,9 +284,11 @@ impl ProtocolRequestBuilder for Request {
             url: self.url().to_string(),
             headers: self
                 .iter()
-                .map(|(name, value)| HttpHeader {
-                    name: name.to_string(),
-                    value: value.to_str().unwrap_or("").to_string(),
+                .filter_map(|(name, value)| {
+                    value.to_str().ok().map(|v| HttpHeader {
+                        name: name.to_string(),
+                        value: v.to_string(),
+                    })
                 })
                 .collect(),
             body,

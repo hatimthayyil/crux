@@ -107,6 +107,18 @@ impl Client {
     /// Panics if we can't create an HTTP request.
     pub async fn send(&self, request: impl Into<Request>) -> Result<RawResponse> {
         let mut request: Request = request.into();
+
+        // Apply per-client default headers for any name not already set on the request.
+        // keys() yields one entry per value (including duplicates), so we use is_some()
+        // to skip a name once we've already appended all its values from config.
+        for name in self.config.headers.keys() {
+            if request.header(name).is_none() {
+                for value in self.config.headers.get_all(name) {
+                    request.append_header(name.clone(), value.clone());
+                }
+            }
+        }
+
         let middleware = self.middleware.clone();
 
         let mw_stack = match request.take_middleware() {
