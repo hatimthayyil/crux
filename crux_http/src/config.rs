@@ -42,7 +42,7 @@ impl Config {
     ) -> Result<Self> {
         let value =
             HeaderValue::from_str(value.as_ref()).map_err(|e| HttpError::Io(e.to_string()))?;
-        self.headers.insert(name, value);
+        self.headers.append(name, value);
         Ok(self)
     }
 
@@ -63,6 +63,22 @@ mod tests {
         let config = Config::default().add_header("x-api-key", "secret").unwrap();
         let val = config.headers.get("x-api-key").unwrap();
         assert_eq!(val.to_str().unwrap(), "secret");
+    }
+
+    #[test]
+    fn add_header_called_twice_preserves_both_values() {
+        let config = Config::default()
+            .add_header("accept", "text/html")
+            .unwrap()
+            .add_header("accept", "application/json")
+            .unwrap();
+        let values: Vec<&str> = config
+            .headers
+            .get_all("accept")
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        assert_eq!(values, ["text/html", "application/json"]);
     }
 
     #[test]
