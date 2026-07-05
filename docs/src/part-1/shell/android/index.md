@@ -128,8 +128,8 @@ Android library added above. This includes compiling and linking the Rust
 dynamic library and generating the runtime bindings and the shared types.
 
 - The [Android NDK](https://developer.android.com/ndk)
-- [BoltFFI](https://www.boltffi.dev/) — `boltffi pack android` builds the native
-  libraries, generates the Kotlin bindings, and writes the `jniLibs`
+- [BoltFFI](https://www.boltffi.dev/) builds the native libraries, generates 
+  the Kotlin bindings, and writes the `jniLibs`
 - The `codegen` binary (with the `facet_typegen` feature) generates the Kotlin
   app data types
 
@@ -165,11 +165,25 @@ You will need to set the `ndkVersion` to one you have installed, go to "**Tools,
 When you have edited the Gradle files, don't forget to click "sync now".
 ```
 
-If you now build your project, BoltFFI and the type generator populate the
-`Android/generated` folder. It holds the native libraries (`jniLibs`), the JNI
-glue and Kotlin bindings, and the generated app types. The `sourceSets`
-directive in the shared library Gradle file (above) points both
-`kotlin.srcDirs` and `jniLibs.srcDirs` at this folder.
+As you can see, The `sourceSets` directive in the shared library Gradle 
+file points both `kotlin.srcDirs` and `jniLibs.srcDirs` at the `generated`
+directory. Let's populate it.
+
+First generate the data types using `codegen`:
+
+```sh
+$ # In `/Android`
+$ cargo run --package shared --bin codegen --features codegen,facet_typegen -- --language kotlin --output-dir generated
+```
+
+Then generate the bindings and native libraries using BoltFFI:
+
+```sh
+$ # In `/shared` 
+$ boltffi pack android
+```
+
+Now your `generated` directory should look like this:
 
 ```sh
 $ ls --tree Android/generated
@@ -208,6 +222,12 @@ Android/generated
    │           └── Shared.kt
    └── jni
       └── jni_glue.c
+```
+
+```admonish tip
+`codegen` will generate a `build.gradle.kts` that we won't be using in this setup.
+Any error reported by the IDE in this file can be ignored, and if the file prevents
+buiding it can safely be deleted.
 ```
 
 ## Create some UI and run in the Simulator
