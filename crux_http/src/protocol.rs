@@ -9,7 +9,7 @@ use derive_builder::Builder;
 use facet_generate_attrs as typegen;
 use serde::{Deserialize, Serialize};
 
-use crate::HttpError;
+use crate::{HttpError, Request, Result};
 
 #[derive(facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct HttpHeader {
@@ -17,6 +17,21 @@ pub struct HttpHeader {
     pub value: String,
 }
 
+/// A raw HTTP request, as sent to the shell over the protocol boundary.
+///
+/// # No header validation
+///
+/// All fields are plain strings. Header names and values are carried as-is with no
+/// validation against the HTTP specification. This is intentional: `HttpRequest` is a
+/// cross-language data carrier deserialised by Swift, Kotlin, and TypeScript shells;
+/// Rust's `http`-crate validation rules cannot be enforced on the other side of that
+/// boundary.
+///
+/// **Shell authors must not assume that header names or values are well-formed.**
+/// Pass them to your underlying HTTP client as-is — it will apply its own rules.
+///
+/// For the ergonomic Rust-side builder that *does* validate header values (and panics
+/// on invalid input), see [`crate::command::RequestBuilder`].
 #[derive(facet::Facet, Serialize, Deserialize, Default, Clone, PartialEq, Eq, Builder)]
 #[builder(
     custom_constructor,
@@ -80,6 +95,15 @@ impl HttpRequest {
 }
 
 impl HttpRequestBuilder {
+    /// Appends a header to the request.
+    ///
+    /// Both `name` and `value` are accepted as plain strings with **no validation**.
+    /// `HttpRequestBuilder` constructs protocol-layer values (primarily for tests),
+    /// not validated HTTP requests, so arbitrary strings — including deliberately
+    /// malformed ones — are allowed.
+    ///
+    /// For validated header setting in app code, use
+    /// [`crate::command::RequestBuilder::header`], which panics on invalid values.
     pub fn header(&mut self, name: impl Into<String>, value: impl Into<String>) -> &mut Self {
         self.headers.get_or_insert_with(Vec::new).push(HttpHeader {
             name: name.into(),
@@ -92,7 +116,7 @@ impl HttpRequestBuilder {
     ///
     /// # Errors
     /// Returns an [`HttpError`] if the serialization fails.
-    pub fn query(&mut self, query: &impl Serialize) -> crate::Result<&mut Self> {
+    pub fn query(&mut self, query: &impl Serialize) -> Result<&mut Self> {
         if let Some(url) = &mut self.url {
             if url.contains('?') {
                 url.push('&');
@@ -185,15 +209,42 @@ impl HttpResponseBuilder {
     }
 }
 
+/// The result of an HTTP request, as returned by the shell over the protocol boundary.
+///
+/// # Status codes are not errors
+///
+/// Any completed HTTP exchange — including responses with 4xx or 5xx status codes — is
+/// returned as [`HttpResult::Ok`]. Only *transport-level* failures (the shell could not
+/// reach the server at all) produce [`HttpResult::Err`].
+///
+/// To act on an error status, inspect [`HttpResponse::status`]:
+///
+/// ```
+/// # use crux_http::protocol::{HttpResult, HttpResponse};
+/// # use crux_http::HttpError;
+/// # fn handle(result: HttpResult) {
+/// match result {
+///     HttpResult::Ok(response) if response.status == 200 => { /* success */ }
+///     HttpResult::Ok(response) if response.status == 404 => { /* not found */ }
+///     HttpResult::Ok(response) if response.status >= 500 => { /* server error */ }
+///     HttpResult::Ok(_) => { /* other status */ }
+///     HttpResult::Err(e) => { /* transport failure: bad URL, IO error, or timeout */ }
+/// }
+/// # }
+/// ```
 #[derive(facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum HttpResult {
+    /// The shell completed the HTTP exchange. The response may carry any status code,
+    /// including 4xx and 5xx — inspect [`HttpResponse::status`] to distinguish them.
     Ok(HttpResponse),
+    /// The shell could not complete the HTTP exchange due to a transport-level failure.
+    /// See [`HttpError`] for the possible causes.
     Err(HttpError),
 }
 
-impl From<crate::Result<HttpResponse>> for HttpResult {
-    fn from(result: Result<HttpResponse, HttpError>) -> Self {
+impl From<Result<HttpResponse>> for HttpResult {
+    fn from(result: Result<HttpResponse>) -> Self {
         match result {
             Ok(response) => Self::Ok(response),
             Err(err) => Self::Err(err),
@@ -220,46 +271,28 @@ pub(crate) trait EffectSender {
     async fn send(&self, effect: HttpRequest) -> HttpResult;
 }
 
-#[async_trait]
 pub(crate) trait ProtocolRequestBuilder {
-    async fn into_protocol_request(mut self) -> crate::Result<HttpRequest>;
+    fn into_protocol_request(self) -> Result<HttpRequest>;
 }
 
-#[async_trait]
-impl ProtocolRequestBuilder for crate::Request {
-    async fn into_protocol_request(mut self) -> crate::Result<HttpRequest> {
-        let body = if self.is_empty() == Some(false) {
-            self.take_body().into_bytes().await?
-        } else {
-            vec![]
-        };
+impl ProtocolRequestBuilder for Request {
+    fn into_protocol_request(mut self) -> Result<HttpRequest> {
+        let body = self.take_body().into_bytes();
 
         Ok(HttpRequest {
             method: self.method().to_string(),
             url: self.url().to_string(),
             headers: self
                 .iter()
-                .flat_map(|(name, values)| {
-                    values.iter().map(|value| HttpHeader {
+                .filter_map(|(name, value)| {
+                    value.to_str().ok().map(|v| HttpHeader {
                         name: name.to_string(),
-                        value: value.to_string(),
+                        value: v.to_string(),
                     })
                 })
                 .collect(),
             body,
         })
-    }
-}
-
-impl From<HttpResponse> for crate::ResponseAsync {
-    fn from(effect_response: HttpResponse) -> Self {
-        let mut res = http_types::Response::new(effect_response.status);
-        res.set_body(effect_response.body);
-        for header in effect_response.headers {
-            res.append_header(header.name.as_str(), header.value);
-        }
-
-        Self::new(res)
     }
 }
 
@@ -536,5 +569,89 @@ mod tests {
             body: "",
         }
         "#);
+    }
+
+    #[test]
+    fn into_protocol_request_is_synchronous_and_carries_body() {
+        use crate::{Request, Url, protocol::ProtocolRequestBuilder};
+        use http::Method;
+
+        let mut req = Request::new(Method::POST, Url::parse("https://example.com").unwrap());
+        req.body_json(&serde_json::json!({"x": 1})).unwrap();
+
+        // into_protocol_request is now a plain (sync) fn — no .await needed.
+        let http_req = req.into_protocol_request().expect("must not fail");
+
+        assert_eq!(http_req.method, "POST");
+        assert_eq!(http_req.url, "https://example.com/");
+        assert!(!http_req.body.is_empty(), "body must be present");
+
+        // Content-Type header must be present in the serialised headers.
+        let has_content_type = http_req.headers.iter().any(|h| {
+            h.name.to_lowercase() == "content-type" && h.value.contains("application/json")
+        });
+        assert!(
+            has_content_type,
+            "Content-Type: application/json header expected"
+        );
+    }
+
+    /// Round-trip: `http::Request<Body>` → `crux_http::Request` → `HttpRequest`
+    #[test]
+    fn http_request_body_round_trip_to_protocol() {
+        use crate::{Body, Request, protocol::ProtocolRequestBuilder};
+
+        let http_req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("https://api.example.com/items")
+            .header("content-type", "application/json")
+            .body(Body::from_json(&serde_json::json!({"name": "widget"})).unwrap())
+            .unwrap();
+
+        let req: Request = http_req.into();
+        let protocol_req = req.into_protocol_request().expect("should convert");
+
+        assert_eq!(protocol_req.method, "POST");
+        assert_eq!(protocol_req.url, "https://api.example.com/items");
+        assert!(!protocol_req.body.is_empty(), "body bytes must be present");
+        assert!(
+            protocol_req.headers.iter().any(|h| {
+                h.name.to_lowercase() == "content-type" && h.value.contains("application/json")
+            }),
+            "Content-Type: application/json must be in headers"
+        );
+        // Deserialise the body back to confirm bytes are correct.
+        let parsed: serde_json::Value = serde_json::from_slice(&protocol_req.body).unwrap();
+        assert_eq!(parsed["name"], "widget");
+    }
+
+    #[test]
+    fn non_ascii_header_values_are_omitted_from_protocol_request() {
+        use crate::{Request, Url, protocol::ProtocolRequestBuilder};
+        use http::{HeaderValue, Method};
+
+        let mut req = Request::new(Method::GET, Url::parse("https://example.com").unwrap());
+
+        // ASCII value — must be forwarded.
+        req.insert_header("x-trace-id", HeaderValue::from_static("abc123"));
+
+        // Opaque bytes (>= 0x80): HeaderValue::from_bytes accepts them, but to_str() fails.
+        // This can arise when headers are set via HeaderValue::from_bytes, e.g. in middleware.
+        let opaque = HeaderValue::from_bytes(b"\x80binary\xff").unwrap();
+        req.insert_header("x-opaque", opaque);
+
+        let protocol_req = req.into_protocol_request().expect("must not fail");
+
+        let has_trace = protocol_req
+            .headers
+            .iter()
+            .any(|h| h.name == "x-trace-id" && h.value == "abc123");
+        let has_opaque = protocol_req.headers.iter().any(|h| h.name == "x-opaque");
+
+        assert!(has_trace, "ASCII header must be forwarded to the shell");
+        assert!(
+            !has_opaque,
+            "header with non-ASCII value must be silently omitted"
+        );
     }
 }

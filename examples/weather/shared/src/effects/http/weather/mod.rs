@@ -6,14 +6,11 @@
 
 pub mod model;
 
-use crux_core::Request;
-use crux_core::command::RequestBuilder;
-use crux_http::command::Http;
-use crux_http::protocol::HttpRequest;
+use crux_core::{Request, command::RequestBuilder};
+use crux_http::{command::Http, http::StatusCode, protocol::HttpRequest};
 use serde::{Deserialize, Serialize};
 
-use crate::effects::location::Location;
-use crate::model::ApiKey;
+use crate::{effects::location::Location, model::ApiKey};
 
 use self::model::current_response::{CurrentWeatherResponse, WEATHER_URL};
 
@@ -84,8 +81,7 @@ where
                     Ok(weather_data)
                 }),
             Err(crux_http::HttpError::Http { code, .. })
-                if code == crux_http::http::StatusCode::Unauthorized
-                    || code == crux_http::http::StatusCode::Forbidden =>
+                if code == StatusCode::UNAUTHORIZED || code == StatusCode::FORBIDDEN =>
             {
                 Err(WeatherError::Unauthorized)
             }

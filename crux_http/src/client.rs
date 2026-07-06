@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use crate::middleware::{Middleware, Next};
 use crate::protocol::{EffectSender, HttpResult, ProtocolRequestBuilder};
-use crate::{Config, Request, RequestBuilder, ResponseAsync, Result};
-use http_types::{Method, Url};
+use crate::{Config, RawResponse, Request, RequestBuilder, Result};
+use http::Method;
+use url::Url;
 
 /// An HTTP client, capable of sending `Request`s
 ///
@@ -16,18 +17,19 @@ use http_types::{Method, Url};
 /// ```no_run
 /// use futures_util::future::BoxFuture;
 /// use crux_http::middleware::{Next, Middleware};
-/// use crux_http::{client::Client, Request, RequestBuilder, ResponseAsync, Result};
+/// use crux_http::{client::Client, Request, RequestBuilder, RawResponse, Result};
+/// use crux_http::http::HeaderValue;
 /// use std::time;
 /// use std::sync::Arc;
 ///
 /// // Fetches an authorization token prior to making a request
-/// fn fetch_auth<'a>(mut req: Request, client: Client, next: Next<'a>) -> BoxFuture<'a, Result<ResponseAsync>> {
+/// fn fetch_auth<'a>(mut req: Request, client: Client, next: Next<'a>) -> BoxFuture<'a, Result<RawResponse>> {
 ///     Box::pin(async move {
 ///         let auth_token = client.get("https://httpbin.org/get")
 ///             .await?
-///             .body_string()
-///             .await?;
-///         req.append_header("Authorization", format!("Bearer {auth_token}"));
+///             .body_string()?;
+///         let value = HeaderValue::from_str(&format!("Bearer {auth_token}")).expect("valid token");
+///         req.append_header("Authorization", value);
 ///         next.run(req, client).await
 ///     })
 /// }
@@ -81,6 +83,18 @@ impl Client {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_with_config<Sender>(sender: Sender, config: Config) -> Self
+    where
+        Sender: EffectSender + Send + Sync + 'static,
+    {
+        Self {
+            config,
+            effect_sender: Arc::new(sender),
+            middleware: Arc::new(vec![]),
+        }
+    }
+
     // This is currently dead code because there's no easy way to configure a client.
     // TODO: fix that in some future PR
     #[allow(dead_code)]
@@ -103,8 +117,20 @@ impl Client {
     ///
     /// # Panics
     /// Panics if we can't create an HTTP request.
-    pub async fn send(&self, request: impl Into<Request>) -> Result<ResponseAsync> {
+    pub async fn send(&self, request: impl Into<Request>) -> Result<RawResponse> {
         let mut request: Request = request.into();
+
+        // Apply per-client default headers for any name not already set on the request.
+        // keys() yields one entry per value (including duplicates), so we use is_some()
+        // to skip a name once we've already appended all its values from config.
+        for name in self.config.headers.keys() {
+            if request.header(name).is_none() {
+                for value in self.config.headers.get_all(name) {
+                    request.append_header(name.clone(), value.clone());
+                }
+            }
+        }
+
         let middleware = self.middleware.clone();
 
         let mw_stack = match request.take_middleware() {
@@ -121,10 +147,9 @@ impl Client {
             Box::pin(async move {
                 let request = request
                     .into_protocol_request()
-                    .await
                     .expect("Failed to create request");
                 match client.effect_sender.send(request).await {
-                    HttpResult::Ok(response) => Ok(response.into()),
+                    HttpResult::Ok(response) => response.try_into(),
                     HttpResult::Err(e) => Err(e),
                 }
             })
@@ -139,7 +164,7 @@ impl Client {
         };
 
         let response = next.run(request, client).await?;
-        Ok(ResponseAsync::new(response.into()))
+        Ok(response)
     }
 
     /// Submit a `Request` and get the response body as bytes.
@@ -148,7 +173,7 @@ impl Client {
     /// Errors if there is an error sending the request
     pub async fn recv_bytes(&self, request: impl Into<Request>) -> Result<Vec<u8>> {
         let mut response = self.send(request.into()).await?;
-        response.body_bytes().await
+        response.body_bytes()
     }
 
     /// Submit a `Request` and get the response body as a string.
@@ -157,7 +182,7 @@ impl Client {
     /// Errors if there is an error sending the request
     pub async fn recv_string(&self, request: impl Into<Request>) -> Result<String> {
         let mut response = self.send(request.into()).await?;
-        response.body_string().await
+        response.body_string()
     }
 
     /// Submit a `Request` and decode the response body from json into a struct.
@@ -169,7 +194,7 @@ impl Client {
         request: impl Into<Request>,
     ) -> Result<T> {
         let mut response = self.send(request.into()).await?;
-        response.body_json::<T>().await
+        response.body_json::<T>()
     }
 
     /// Submit a `Request` and decode the response body from form encoding into a struct.
@@ -186,7 +211,7 @@ impl Client {
         request: impl Into<Request>,
     ) -> Result<T> {
         let mut response = self.send(request.into()).await?;
-        response.body_form::<T>().await
+        response.body_form::<T>()
     }
 
     /// Perform an HTTP `GET` request using the `Client` connection.
@@ -199,7 +224,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn get(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Get, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::GET, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `HEAD` request using the `Client` connection.
@@ -212,7 +237,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn head(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Head, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::HEAD, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `POST` request using the `Client` connection.
@@ -225,7 +250,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn post(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Post, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::POST, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `PUT` request using the `Client` connection.
@@ -238,7 +263,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn put(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Put, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::PUT, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `DELETE` request using the `Client` connection.
@@ -251,7 +276,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn delete(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Delete, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::DELETE, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `CONNECT` request using the `Client` connection.
@@ -264,7 +289,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn connect(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Connect, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::CONNECT, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `OPTIONS` request using the `Client` connection.
@@ -277,7 +302,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn options(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Options, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::OPTIONS, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `TRACE` request using the `Client` connection.
@@ -290,7 +315,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn trace(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Trace, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::TRACE, self.url(uri), self.clone())
     }
 
     /// Perform an HTTP `PATCH` request using the `Client` connection.
@@ -303,7 +328,7 @@ impl Client {
     ///
     /// Returns errors from the middleware, http backend, and network sockets.
     pub fn patch(&self, uri: impl AsRef<str>) -> RequestBuilder<()> {
-        RequestBuilder::new_for_middleware(Method::Patch, self.url(uri), self.clone())
+        RequestBuilder::new_for_middleware(Method::PATCH, self.url(uri), self.clone())
     }
 
     /// Perform a HTTP request with the given verb using the `Client` connection.
@@ -349,11 +374,134 @@ mod client_tests {
         let client = Client::new(shell.clone());
 
         let mut response = client.get("https://example.com").await.unwrap();
-        assert_eq!(response.body_string().await.unwrap(), "Hello World!");
+        assert_eq!(response.body_string().unwrap(), "Hello World!");
 
         assert_eq!(
             shell.take_requests_received(),
             vec![HttpRequest::get("https://example.com/").build()]
         );
+    }
+
+    #[futures_test::test]
+    async fn config_headers_are_sent_with_every_request() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().build());
+
+        let config = crate::Config::default()
+            .add_header("x-api-key", "secret")
+            .unwrap();
+        let client = Client::new_with_config(shell.clone(), config);
+
+        client.get("https://example.com").await.unwrap();
+
+        let reqs = shell.take_requests_received();
+        assert_eq!(reqs.len(), 1);
+        assert!(
+            reqs[0]
+                .headers
+                .iter()
+                .any(|h| h.name == "x-api-key" && h.value == "secret"),
+            "x-api-key config header must appear in the outgoing request"
+        );
+    }
+
+    #[futures_test::test]
+    async fn per_request_header_takes_precedence_over_config_header() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().build());
+
+        let config = crate::Config::default()
+            .add_header("x-version", "config-value")
+            .unwrap();
+        let client = Client::new_with_config(shell.clone(), config);
+
+        // Per-request header for the same name.
+        let mut req =
+            crate::Request::new(http::Method::GET, "https://example.com".parse().unwrap());
+        req.insert_header("x-version", http::HeaderValue::from_static("request-value"));
+        client.send(req).await.unwrap();
+
+        let reqs = shell.take_requests_received();
+        let values: Vec<&str> = reqs[0]
+            .headers
+            .iter()
+            .filter(|h| h.name == "x-version")
+            .map(|h| h.value.as_str())
+            .collect();
+
+        assert_eq!(values, ["request-value"], "per-request header must win");
+    }
+
+    #[futures_test::test]
+    async fn recv_bytes_returns_body() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("bytes").build());
+        let client = Client::new(shell);
+        let bytes = client
+            .recv_bytes(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"bytes");
+    }
+
+    #[futures_test::test]
+    async fn recv_string_returns_body() {
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("hello").build());
+        let client = Client::new(shell);
+        let text = client
+            .recv_string(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(text, "hello");
+    }
+
+    #[futures_test::test]
+    async fn recv_json_deserializes_body() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Payload {
+            value: u32,
+        }
+        let shell = FakeShell::default();
+        shell.provide_response(
+            HttpResponse::ok()
+                .header("content-type", "application/json")
+                .json(serde_json::json!({"value": 42}))
+                .build(),
+        );
+        let client = Client::new(shell);
+        let payload: Payload = client
+            .recv_json(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(payload, Payload { value: 42 });
+    }
+
+    #[futures_test::test]
+    async fn recv_form_deserializes_body() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct Payload {
+            key: String,
+        }
+        let shell = FakeShell::default();
+        shell.provide_response(HttpResponse::ok().body("key=val").build());
+        let client = Client::new(shell);
+        let payload: Payload = client
+            .recv_form(crate::Request::new(
+                http::Method::GET,
+                "https://example.com".parse().unwrap(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(payload, Payload { key: "val".into() });
     }
 }
