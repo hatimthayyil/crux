@@ -22,6 +22,10 @@ That's how a capability gets used. But where do these APIs come from? Let's buil
 
 `Render` ships in `crux_core`; `crux_http`, `crux_kv`, and `crux_time` are separate crates Crux publishes. Location services aren't — they work differently enough across platforms that a cross-platform crate would do more harm than good, and they're specific enough that we didn't want to maintain an official one either. So the weather app defines its own.
 
+> If you're upgrading an existing app, note that `crux_http` 0.19 switched from
+> `http-types` to the standard [`http`](https://docs.rs/http) crate — see the
+> [Migrating `crux_http` to native `http` types](../guide/migrate-crux-http.md) guide.
+
 A capability is two things:
 
 1. A protocol for talking to the shell — an operation type and a response type.

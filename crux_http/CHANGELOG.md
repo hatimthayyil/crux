@@ -8,6 +8,11 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.19.0](https://github.com/redbadger/crux/compare/crux_http-v0.18.0...crux_http-v0.19.0) - 2026-07-06
+
+> **📖 See the [Migrating `crux_http` to native `http` types](https://redbadger.github.io/crux/guide/migrate-crux-http.html)
+> guide in the book for a step-by-step walkthrough of the changes below.**
+
 ### 💥 Breaking Changes
 
 **`crux_http::http` now re-exports the real [`http`](https://docs.rs/http) crate (v1.4), not `http-types`.**

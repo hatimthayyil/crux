@@ -9,6 +9,12 @@ make an HTTP request.
 For an example of how to use the capability, see the
 [integration test](./tests/with_shell.rs).
 
+> **Migrating from `crux_http` 0.18 or earlier?** As of 0.19, `crux_http` builds on
+> the standard [`http`](https://docs.rs/http) crate instead of `http-types`. This is
+> a breaking change — see the
+> [Migrating `crux_http` to native `http` types](https://redbadger.github.io/crux/guide/migrate-crux-http.html)
+> guide for the details.
+
 The code for this was largely copied from
 [`surf`](https://github.com/http-rs/surf) with some modifications made to fit
 into the crux paradigm.
